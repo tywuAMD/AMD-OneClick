@@ -10,6 +10,7 @@ class NotebookRequest(BaseModel):
     """Request model for creating a notebook instance"""
     email: EmailStr
     image: Optional[str] = None
+    reservation_end_at: Optional[datetime] = None
 
 
 class GitHubNotebookInfo(BaseModel):
@@ -19,6 +20,14 @@ class GitHubNotebookInfo(BaseModel):
     branch: str
     path: str
     raw_url: str
+
+
+class GitHubNotebookCreateRequest(BaseModel):
+    """Request model for creating a notebook from GitHub source"""
+    org: str
+    repo: str
+    branch: str
+    path: str
 
 
 class NotebookInstance(BaseModel):

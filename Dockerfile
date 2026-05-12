@@ -7,9 +7,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY app/ ./app/
-COPY templates/ ./templates/
-COPY static/ ./static/
+# IMPORTANT: build with repository root as context:
+#   docker build -f AMD-OneClick/Dockerfile .
+COPY AMD-OneClick/app/ ./app/
+COPY AMD-OneClick/templates/ ./templates/
+COPY AMD-OneClick/static/ ./static/
+COPY web/ ./reservation_web/
 
 # Expose port
 EXPOSE 8000

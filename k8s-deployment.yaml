@@ -43,17 +43,19 @@ metadata:
   namespace: default
 data:
   K8S_NAMESPACE: "default"
-  DEFAULT_IMAGE: "docker.io/rocm/vllm-dev:rocm7.1.1_navi_ubuntu24.04_py3.12_pytorch_2.8_vllm_0.10.2rc1"
+  DEFAULT_IMAGE: "docker.io/rocm/vllm:rocm7.12.0_gfx110X-all_ubuntu24.04_py3.12_pytorch_2.9.1_vllm_0.16.0"
   CPU_LIMIT: "128"
   MEMORY_LIMIT: "256Gi"
-  GPU_LIMIT: "1"
+  GPU_LIMIT: "8"
   CPU_REQUEST: "40"
   MEMORY_REQUEST: "48Gi"
   IDLE_TIMEOUT_MINUTES: "10"
   MAX_LIFETIME_HOURS: "6"
-  SERVICE_HOST: "36.151.243.69"
+  SERVICE_HOST: "36.151.243.117"
   NODE_PORT_BASE: "30000"
   NOTEBOOK_TOKEN: "amd-oneclick"
+  RESERVATION_API_BASE_URL: "http://36.151.243.117:30410/api"
+  ALLOW_PUBLIC_NOTEBOOK_API: "true"
 
 ---
 apiVersion: v1
@@ -64,6 +66,7 @@ metadata:
 type: Opaque
 stringData:
   ADMIN_PASSWORD: "admin123"
+  NOTEBOOK_BRIDGE_SHARED_TOKEN: "change_this_shared_bridge_token"
 
 ---
 apiVersion: apps/v1

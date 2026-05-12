@@ -5,6 +5,13 @@ import os
 from typing import Optional
 
 
+def _parse_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class Settings:
     # K8s Configuration
     K8S_NAMESPACE: str = os.getenv("K8S_NAMESPACE", "default")
@@ -12,12 +19,12 @@ class Settings:
     # Default Notebook Image
     DEFAULT_IMAGE: str = os.getenv(
         "DEFAULT_IMAGE", 
-        "docker.io/rocm/vllm-dev:rocm7.1.1_navi_ubuntu24.04_py3.12_pytorch_2.8_vllm_0.10.2rc1"
+        "docker.io/rocm/vllm:rocm7.12.0_gfx110X-all_ubuntu24.04_py3.12_pytorch_2.9.1_vllm_0.16.0"
     )
     
     # Available Images (can be extended)
     AVAILABLE_IMAGES: list = [
-        "docker.io/rocm/vllm-dev:rocm7.1.1_navi_ubuntu24.04_py3.12_pytorch_2.8_vllm_0.10.2rc1",
+        "docker.io/rocm/vllm:rocm7.12.0_gfx110X-all_ubuntu24.04_py3.12_pytorch_2.9.1_vllm_0.16.0",
     ]
     
     # Notebook Configuration
@@ -46,6 +53,11 @@ class Settings:
     # Service Configuration
     SERVICE_HOST: str = os.getenv("SERVICE_HOST", "localhost")
     NODE_PORT_BASE: int = int(os.getenv("NODE_PORT_BASE", "30000"))
+
+    # Reservation integration
+    RESERVATION_API_BASE_URL: str = os.getenv("RESERVATION_API_BASE_URL", "http://localhost:4100/api")
+    NOTEBOOK_BRIDGE_SHARED_TOKEN: Optional[str] = os.getenv("NOTEBOOK_BRIDGE_SHARED_TOKEN")
+    ALLOW_PUBLIC_NOTEBOOK_API: bool = _parse_bool("ALLOW_PUBLIC_NOTEBOOK_API", True)
     
     # PyPI Mirror for China
     PYPI_MIRROR: str = "https://pypi.tuna.tsinghua.edu.cn/simple"

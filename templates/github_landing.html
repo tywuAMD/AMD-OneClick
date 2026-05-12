@@ -314,8 +314,8 @@
                     return;
                 }
 
-                // If already running, redirect immediately
-                if (data.status === 'running' && data.url) {
+                // If already running/ready, redirect immediately
+                if ((data.status === 'running' || data.status === 'ready' || data.status === 'exists') && data.url) {
                     showSuccess(data.url);
                     return;
                 }
@@ -345,7 +345,7 @@
 
                 updateStatus(data.status);
 
-                if (data.status === 'running' && data.url) {
+                if ((data.status === 'running' || data.status === 'ready') && data.url) {
                     clearInterval(pollInterval);
                     showSuccess(data.url);
                 } else if (data.status === 'error' || data.status === 'not_found') {

@@ -562,7 +562,7 @@
 
         async function destroyAllInstances() {
             try {
-                const response = await fetch('/api/admin/instances', {
+                const response = await fetch('/api/admin/instances/all', {
                     method: 'DELETE'
                 });
                 const data = await response.json();

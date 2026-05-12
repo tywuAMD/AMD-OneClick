@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AMD Platform Reservation System</title>
+    <link rel="stylesheet" href="/reservation-assets/styles.css">
+</head>
+<body>
+    <div class="auth-screen" id="authScreen">
+        <div class="auth-card">
+            <h2 id="authTitle">Team Login</h2>
+            <p class="auth-hint" id="authHint">Please sign in with your team account to make reservations.</p>
+            <div class="auth-switch" role="tablist" aria-label="Authentication mode">
+                <button type="button" class="auth-switch-btn active" id="showLoginBtn" data-auth-mode="login" aria-selected="true">Log In</button>
+                <button type="button" class="auth-switch-btn" id="showResetPasswordBtn" data-auth-mode="reset" aria-selected="false">Reset Password</button>
+            </div>
+            <form id="loginForm" class="auth-form">
+                <div class="form-group">
+                    <label for="loginUsername">Username</label>
+                    <input type="text" id="loginUsername" required autocomplete="username" placeholder="Enter username">
+                </div>
+                <div class="form-group">
+                    <label for="loginPassword">Password</label>
+                    <input type="password" id="loginPassword" required autocomplete="current-password" placeholder="Enter password">
+                </div>
+                <button type="submit" class="btn btn-primary" id="loginBtn">Log In</button>
+            </form>
+            <form id="resetPasswordForm" class="auth-form hidden">
+                <div class="form-group">
+                    <label for="resetUsername">Username</label>
+                    <input type="text" id="resetUsername" required autocomplete="username" placeholder="Your assigned username">
+                </div>
+                <div class="form-group">
+                    <label for="resetCurrentPassword">Current Password</label>
+                    <input type="password" id="resetCurrentPassword" required autocomplete="current-password" placeholder="Enter current/default password">
+                </div>
+                <div class="form-group">
+                    <label for="resetNewPassword">New Password</label>
+                    <input type="password" id="resetNewPassword" required autocomplete="new-password" placeholder="At least 8 characters">
+                </div>
+                <div class="form-group">
+                    <label for="resetNewPasswordConfirm">Confirm New Password</label>
+                    <input type="password" id="resetNewPasswordConfirm" required autocomplete="new-password" placeholder="Re-enter new password">
+                </div>
+                <button type="submit" class="btn btn-primary" id="resetPasswordBtn">Update Password</button>
+            </form>
+            <p class="auth-message" id="loginMessage" aria-live="polite"></p>
+        </div>
+    </div>
+
+    <div class="container hidden" id="appContainer">
+        <header>
+            <h1>AMD Platform Reservation System</h1>
+            <p class="section-hint">
+                Need direct notebook tools? <a href="{{ notebook_home_path }}">Legacy notebook launcher</a> |
+                <a href="/admin">OneClick Admin</a>
+            </p>
+        </header>
+
+        <main>
+            <section class="user-section">
+                <div class="user-section-top">
+                    <div class="current-user-info">
+                        <span class="summary-label">Current User</span>
+                        <strong class="user-label" id="currentUserLabel">Logged in</strong>
+                    </div>
+                    <button type="button" class="btn btn-secondary btn-small" id="logoutBtn">Log Out</button>
+                </div>
+                <h2>Upcoming Reservations</h2>
+                <p class="section-hint" id="reservationsScopeHint">Reservations for your logged-in account appear here and can be canceled anytime.</p>
+                <div id="reservationsList" class="reservations-list"></div>
+            </section>
+
+            <div class="booking-steps" aria-label="Reservation steps">
+                <div class="step-item active">
+                    <span class="step-number">1</span>
+                    <span>Select</span>
+                </div>
+                <div class="step-item">
+                    <span class="step-number">2</span>
+                    <span>Schedule</span>
+                </div>
+                <div class="step-item">
+                    <span class="step-number">3</span>
+                    <span>Confirm</span>
+                </div>
+            </div>
+
+            <section class="summary-section" id="summarySection">
+                <div class="summary-grid">
+                    <div class="summary-item">
+                        <span class="summary-label">Platform</span>
+                        <strong id="summaryPlatform">Not selected</strong>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">Date</span>
+                        <strong id="summaryDate">Not selected</strong>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">Time Range</span>
+                        <strong id="summaryTime">Not selected</strong>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">Status</span>
+                        <strong class="status-chip pending" id="summaryStatus">Waiting for input</strong>
+                    </div>
+                </div>
+                <p class="summary-note" id="summaryNote">Start by selecting a platform and date.</p>
+            </section>
+
+            <section class="platform-section">
+                <h2><span class="section-step">Step 1</span>Select Platform</h2>
+                <p class="section-hint">Choose the server platform assigned for your team.</p>
+                <div class="platform-selector" id="platformSelector"></div>
+            </section>
+
+            <section class="date-section">
+                <h2><span class="section-step">Step 2</span>Select Date</h2>
+                <p class="section-hint">Pick your contest day or use a quick shortcut.</p>
+                <div class="date-picker">
+                    <input type="date" id="dateInput" min="" value="">
+                </div>
+                <div class="quick-date-buttons" role="group" aria-label="Quick date selection">
+                    <button type="button" class="quick-date-btn" data-offset="0">Today</button>
+                    <button type="button" class="quick-date-btn" data-offset="1">Tomorrow</button>
+                    <button type="button" class="quick-date-btn" data-offset="7">Next Week</button>
+                </div>
+            </section>
+
+            <section class="reservation-section" id="reservationSection" style="display: none;">
+                <h2><span class="section-step">Step 3</span>Reservation Details</h2>
+                <p class="section-hint">Click an available time slot or choose start time and duration below.</p>
+                <p class="reservation-limit-note">The maximum reservation duration is 6 hours.</p>
+
+                <div class="timeline-container" id="timelineContainer"></div>
+
+                <div class="time-duration-selection">
+                    <div class="time-duration-inputs">
+                        <div class="form-group">
+                            <label for="startTime">Start Time *</label>
+                            <input type="time" id="startTime" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="duration">Duration (hours) *</label>
+                            <select id="duration" required>
+                                <option value="">Select duration</option>
+                                <option value="1">1 hour</option>
+                                <option value="2">2 hours</option>
+                                <option value="3">3 hours</option>
+                                <option value="4">4 hours</option>
+                                <option value="5">5 hours</option>
+                                <option value="6">6 hours</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="action-row">
+                        <button type="button" class="btn btn-primary" id="makeReservationBtn">Review Reservation</button>
+                        <p class="action-tip">Tip: first click sets start time, second click sets end time and duration.</p>
+                    </div>
+                    <div id="availabilityMessage" class="availability-message" aria-live="polite"></div>
+                </div>
+            </section>
+
+            <div class="confirmation-modal" id="confirmationModal">
+                <div class="modal-content confirmation-content">
+                    <h2>Confirm Your Reservation</h2>
+                    <div id="confirmationDetails" class="confirmation-details"></div>
+
+                    <form id="reservationForm">
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-secondary" id="cancelConfirmBtn">Cancel</button>
+                            <button type="submit" class="btn btn-primary">Confirm Reservation</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="success-modal" id="successModal">
+                <div class="modal-content">
+                    <div class="success-icon">✓</div>
+                    <h2>Reservation Confirmed!</h2>
+                    <p id="confirmationMessage"></p>
+                    <button class="btn btn-primary" id="closeModal">Back</button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        window.RESERVATION_API_BASE_URL = "{{ reservation_api_base_url }}";
+        window.ONECLICK_NOTEBOOK_PATH = "{{ notebook_home_path }}";
+        window.ONECLICK_ADMIN_PATH = "/admin";
+    </script>
+    <script src="/reservation-assets/script.js"></script>
+</body>
+</html>

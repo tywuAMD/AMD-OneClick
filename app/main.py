@@ -4,9 +4,11 @@ FastAPI main application for AMD OneClick Notebook Manager
 import hashlib
 import logging
 from contextlib import asynccontextmanager
+from datetime import timezone
+from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Depends, Query, Request, Response, Cookie
+from fastapi import FastAPI, HTTPException, Depends, Query, Request, Response, Cookie, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -16,6 +18,7 @@ import secrets
 from .config import settings
 from .models import (
     NotebookRequest, 
+    GitHubNotebookCreateRequest,
     NotebookStatus, 
     AdminListResponse, 
     NotebookListItem,
@@ -52,11 +55,17 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+REPO_WEB_DIR = BASE_DIR.parent / "web"
+PACKAGED_WEB_DIR = BASE_DIR / "reservation_web"
+RESERVATION_ASSETS_DIR = PACKAGED_WEB_DIR if PACKAGED_WEB_DIR.exists() else REPO_WEB_DIR
+
 # Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+app.mount("/reservation-assets", StaticFiles(directory=str(RESERVATION_ASSETS_DIR)), name="reservation-assets")
 
 # Templates
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 # HTTP Basic Auth for admin
 security = HTTPBasic()
@@ -77,13 +86,46 @@ def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
     return credentials.username
 
 
+def require_notebook_api_access(request: Request):
+    """Optionally require internal bridge token for notebook APIs."""
+    if settings.ALLOW_PUBLIC_NOTEBOOK_API:
+        return
+
+    expected_token = (settings.NOTEBOOK_BRIDGE_SHARED_TOKEN or "").strip()
+    if not expected_token:
+        raise HTTPException(
+            status_code=503,
+            detail="Notebook API bridge token is not configured."
+        )
+
+    provided_token = request.headers.get("x-bridge-token", "").strip()
+    if not provided_token:
+        raise HTTPException(status_code=403, detail="Missing bridge token.")
+
+    if not secrets.compare_digest(provided_token, expected_token):
+        raise HTTPException(status_code=403, detail="Invalid bridge token.")
+
+
 # =============================================================================
 # User Endpoints
 # =============================================================================
 
 @app.get("/", response_class=HTMLResponse)
+async def reservation_home(request: Request):
+    """Render reservation-first homepage."""
+    return templates.TemplateResponse(
+        "reservation_entry.html",
+        {
+            "request": request,
+            "reservation_api_base_url": settings.RESERVATION_API_BASE_URL,
+            "notebook_home_path": "/notebook"
+        }
+    )
+
+
+@app.get("/notebook", response_class=HTMLResponse)
 async def index(request: Request):
-    """Render the main request page"""
+    """Render the legacy OneClick notebook request page."""
     return templates.TemplateResponse(
         "index.html",
         {
@@ -95,10 +137,21 @@ async def index(request: Request):
 
 
 @app.post("/api/notebook/request", response_model=NotebookStatus)
-async def request_notebook(req: NotebookRequest):
+async def request_notebook(
+    req: NotebookRequest,
+    _access: None = Depends(require_notebook_api_access)
+):
     """Request a notebook instance"""
     email = req.email.lower()
     image = req.image or settings.DEFAULT_IMAGE
+    reservation_end_at = req.reservation_end_at
+    reservation_end_at_iso = None
+    if reservation_end_at:
+        if reservation_end_at.tzinfo is None:
+            reservation_end_at = reservation_end_at.replace(tzinfo=timezone.utc)
+        else:
+            reservation_end_at = reservation_end_at.astimezone(timezone.utc)
+        reservation_end_at_iso = reservation_end_at.isoformat()
     
     # Validate image
     if image not in settings.AVAILABLE_IMAGES:
@@ -109,6 +162,9 @@ async def request_notebook(req: NotebookRequest):
         existing = k8s_client.get_instance_by_email(email)
         
         if existing:
+            if reservation_end_at_iso:
+                k8s_client.update_instance_reservation_end(email, reservation_end_at_iso)
+
             status = k8s_client.get_pod_status(email)
             
             if status == "ready" or status == "running":
@@ -137,7 +193,11 @@ async def request_notebook(req: NotebookRequest):
                 )
         
         # Create new instance
-        instance = k8s_client.create_instance(email, image)
+        instance = k8s_client.create_instance(
+            email,
+            image,
+            reservation_end_at=reservation_end_at_iso
+        )
         
         # Send email notification (async, don't wait)
         if instance.get("url"):
@@ -156,7 +216,10 @@ async def request_notebook(req: NotebookRequest):
 
 
 @app.get("/api/notebook/status", response_model=NotebookStatus)
-async def check_status(email: str = Query(..., description="User email")):
+async def check_status(
+    email: str = Query(..., description="User email"),
+    _access: None = Depends(require_notebook_api_access)
+):
     """Check the status of a notebook instance"""
     email = email.lower()
     
@@ -279,12 +342,24 @@ async def github_notebook(
 async def create_github_notebook(
     request: Request,
     response: Response,
-    org: str = Query(...),
-    repo: str = Query(...),
-    branch: str = Query(...),
-    path: str = Query(...)
+    payload: Optional[GitHubNotebookCreateRequest] = Body(None),
+    org: Optional[str] = Query(None),
+    repo: Optional[str] = Query(None),
+    branch: Optional[str] = Query(None),
+    path: Optional[str] = Query(None)
 ):
     """Create a notebook instance for a GitHub notebook"""
+    org = org or (payload.org if payload else None)
+    repo = repo or (payload.repo if payload else None)
+    branch = branch or (payload.branch if payload else None)
+    path = path or (payload.path if payload else None)
+
+    if not all([org, repo, branch, path]):
+        raise HTTPException(
+            status_code=400,
+            detail='Provide "org", "repo", "branch", and "path" via query params or JSON body.'
+        )
+
     github_info = {
         "org": org,
         "repo": repo,
@@ -442,7 +517,7 @@ async def destroy_instance(instance_id: str, username: str = Depends(verify_admi
         )
         
     except Exception as e:
-        logger.error(f"Error destroying instance for {email}: {e}")
+        logger.error(f"Error destroying instance {instance_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -461,6 +536,12 @@ async def destroy_all_instances(username: str = Depends(verify_admin)):
     except Exception as e:
         logger.error(f"Error destroying all instances: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/admin/instances", response_model=DestroyResponse)
+async def destroy_all_instances_legacy(username: str = Depends(verify_admin)):
+    """Legacy alias for destroy-all endpoint."""
+    return await destroy_all_instances(username)
 
 
 @app.post("/api/admin/cleanup")

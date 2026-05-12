@@ -45,9 +45,24 @@ class K8sClient:
             "instance-id": instance_id,
             "email-hash": hashlib.md5(email.lower().encode()).hexdigest()[:16],
         }
+
+    def _parse_iso_datetime(self, value: Optional[str]) -> Optional[datetime]:
+        """Parse ISO timestamp into a timezone-aware datetime."""
+        if not value:
+            return None
+
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except ValueError:
+            logger.warning("Invalid ISO timestamp: %s", value)
+            return None
     
     def _get_pod_manifest(self, email: str, instance_id: str, image: str, 
-                          github_info: Optional[dict] = None) -> dict:
+                          github_info: Optional[dict] = None,
+                          reservation_end_at: Optional[str] = None) -> dict:
         """Generate Pod manifest"""
         labels = self._get_labels(email, instance_id)
         
@@ -55,6 +70,9 @@ class K8sClient:
             "amd-oneclick/email": email,
             "amd-oneclick/created-at": datetime.now(timezone.utc).isoformat(),
         }
+
+        if reservation_end_at:
+            annotations["amd-oneclick/reservation-end-at"] = reservation_end_at
         
         # Add GitHub info to annotations if provided
         if github_info:
@@ -237,6 +255,8 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                 node_port = svc.spec.ports[0].node_port if svc.spec.ports else None
             except ApiException:
                 node_port = None
+
+            annotations = pod.metadata.annotations or {}
             
             return {
                 "id": instance_id,
@@ -246,6 +266,7 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                 "image": pod.spec.containers[0].image,
                 "status": pod.status.phase.lower(),
                 "created_at": pod.metadata.creation_timestamp,
+                "reservation_end_at": annotations.get("amd-oneclick/reservation-end-at"),
                 "node_port": node_port,
                 "url": self._build_url(node_port) if node_port else None
             }
@@ -265,7 +286,8 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
     
     def create_instance(self, email: str, image: Optional[str] = None, 
                         github_info: Optional[dict] = None,
-                        custom_instance_id: Optional[str] = None) -> dict:
+                        custom_instance_id: Optional[str] = None,
+                        reservation_end_at: Optional[str] = None) -> dict:
         """Create a new notebook instance"""
         instance_id = custom_instance_id or self._generate_instance_id(email)
         image = image or settings.DEFAULT_IMAGE
@@ -279,7 +301,13 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
         node_port = self._allocate_node_port()
         
         # Create Pod
-        pod_manifest = self._get_pod_manifest(email, instance_id, image, github_info)
+        pod_manifest = self._get_pod_manifest(
+            email,
+            instance_id,
+            image,
+            github_info,
+            reservation_end_at=reservation_end_at
+        )
         try:
             self.core_v1.create_namespaced_pod(
                 namespace=self.namespace,
@@ -314,6 +342,7 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
             "image": image,
             "status": "pending",
             "created_at": datetime.now(timezone.utc),
+            "reservation_end_at": reservation_end_at,
             "node_port": node_port,
             "url": self._build_url(node_port, notebook_path),
             "github_info": github_info
@@ -337,8 +366,9 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
             except ApiException:
                 node_port = None
             
-            email = pod.metadata.annotations.get("amd-oneclick/email", "unknown")
-            github_path = pod.metadata.annotations.get("amd-oneclick/github-path")
+            annotations = pod.metadata.annotations or {}
+            email = annotations.get("amd-oneclick/email", "unknown")
+            github_path = annotations.get("amd-oneclick/github-path")
             
             return {
                 "id": instance_id,
@@ -348,16 +378,43 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                 "image": pod.spec.containers[0].image,
                 "status": pod.status.phase.lower(),
                 "created_at": pod.metadata.creation_timestamp,
+                "reservation_end_at": annotations.get("amd-oneclick/reservation-end-at"),
                 "node_port": node_port,
                 "url": self._build_url(node_port, github_path) if node_port else None,
-                "github_org": pod.metadata.annotations.get("amd-oneclick/github-org"),
-                "github_repo": pod.metadata.annotations.get("amd-oneclick/github-repo"),
+                "github_org": annotations.get("amd-oneclick/github-org"),
+                "github_repo": annotations.get("amd-oneclick/github-repo"),
                 "github_path": github_path,
             }
         except ApiException as e:
             if e.status == 404:
                 return None
             raise
+
+    def update_instance_reservation_end_by_id(self, instance_id: str, reservation_end_at: str) -> bool:
+        """Update reservation end timestamp annotation for an instance pod."""
+        try:
+            self.core_v1.patch_namespaced_pod(
+                name=instance_id,
+                namespace=self.namespace,
+                body={
+                    "metadata": {
+                        "annotations": {
+                            "amd-oneclick/reservation-end-at": reservation_end_at
+                        }
+                    }
+                }
+            )
+            return True
+        except ApiException as e:
+            if e.status == 404:
+                return False
+            logger.warning("Failed to patch reservation end for %s: %s", instance_id, e)
+            return False
+
+    def update_instance_reservation_end(self, email: str, reservation_end_at: str) -> bool:
+        """Update reservation end timestamp annotation by user email."""
+        instance_id = self._generate_instance_id(email)
+        return self.update_instance_reservation_end_by_id(instance_id, reservation_end_at)
     
     def delete_instance_by_id(self, instance_id: str) -> bool:
         """Delete a notebook instance by instance ID"""
@@ -406,13 +463,15 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
             
             for pod in pods.items:
                 instance_id = pod.metadata.labels.get("instance-id", "unknown")
-                email = pod.metadata.annotations.get("amd-oneclick/email", "unknown")
+                annotations = pod.metadata.annotations or {}
+                email = annotations.get("amd-oneclick/email", "unknown")
                 created_at = pod.metadata.creation_timestamp
                 
                 # Get GitHub info from annotations
-                github_org = pod.metadata.annotations.get("amd-oneclick/github-org")
-                github_repo = pod.metadata.annotations.get("amd-oneclick/github-repo")
-                github_path = pod.metadata.annotations.get("amd-oneclick/github-path")
+                github_org = annotations.get("amd-oneclick/github-org")
+                github_repo = annotations.get("amd-oneclick/github-repo")
+                github_path = annotations.get("amd-oneclick/github-path")
+                reservation_end_at = annotations.get("amd-oneclick/reservation-end-at")
                 
                 # Get NodePort from service
                 node_port = None
@@ -439,6 +498,7 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                     "image": pod.spec.containers[0].image if pod.spec.containers else "unknown",
                     "status": pod.status.phase.lower() if pod.status.phase else "unknown",
                     "created_at": created_at.isoformat() if created_at else None,
+                    "reservation_end_at": reservation_end_at,
                     "node_port": node_port,
                     "url": self._build_url(node_port, github_path) if node_port else None,
                     "uptime_minutes": uptime_minutes,
@@ -556,15 +616,20 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
         for instance in instances:
             should_delete = False
             reason = ""
+            reservation_end_at = self._parse_iso_datetime(instance.get("reservation_end_at"))
+
+            if reservation_end_at and now >= reservation_end_at:
+                should_delete = True
+                reason = f"reservation ended at {reservation_end_at.isoformat()}"
             
             # Check max lifetime
             uptime_hours = instance["uptime_minutes"] / 60
-            if uptime_hours >= settings.MAX_LIFETIME_HOURS:
+            if not should_delete and uptime_hours >= settings.MAX_LIFETIME_HOURS:
                 should_delete = True
                 reason = f"exceeded max lifetime ({settings.MAX_LIFETIME_HOURS}h)"
             
             # Check idle timeout (only for running instances)
-            elif instance["status"] == "running":
+            elif not should_delete and instance["status"] == "running":
                 last_activity = self.check_pod_activity(instance["email"])
                 if last_activity:
                     idle_minutes = (now - last_activity).total_seconds() / 60
