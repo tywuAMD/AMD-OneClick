@@ -87,7 +87,7 @@ spec:
       serviceAccountName: amd-oneclick-manager
       containers:
         - name: manager
-          image: docker.io/vivienfanghua/amd-oneclick:latest
+          image: tyamd/cie2016:latest
           imagePullPolicy: Always
           workingDir: /app
           ports:
