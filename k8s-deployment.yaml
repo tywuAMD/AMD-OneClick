@@ -54,7 +54,7 @@ data:
   SERVICE_HOST: "36.151.243.117"
   NODE_PORT_BASE: "30000"
   NOTEBOOK_TOKEN: "amd-oneclick"
-  RESERVATION_API_BASE_URL: "http://36.151.243.117:30410/api"
+  RESERVATION_API_BASE_URL: "http://36.151.243.117:4100/api"
   ALLOW_PUBLIC_NOTEBOOK_API: "true"
 
 ---
@@ -66,7 +66,7 @@ metadata:
 type: Opaque
 stringData:
   ADMIN_PASSWORD: "admin123"
-  NOTEBOOK_BRIDGE_SHARED_TOKEN: "change_this_shared_bridge_token"
+  NOTEBOOK_BRIDGE_SHARED_TOKEN: "9ca9c7fa3500226449f2962a5dc19e877cbb8ebb9b386918a10f3a31d649e8c9"
 
 ---
 apiVersion: apps/v1
