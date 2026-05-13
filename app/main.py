@@ -114,8 +114,9 @@ def require_notebook_api_access(request: Request):
 async def reservation_home(request: Request):
     """Render reservation-first homepage."""
     return templates.TemplateResponse(
-        "reservation_entry.html",
-        {
+        request=request,
+        name="reservation_entry.html",
+        context={
             "request": request,
             "reservation_api_base_url": settings.RESERVATION_API_BASE_URL,
             "notebook_home_path": "/notebook"
@@ -127,8 +128,9 @@ async def reservation_home(request: Request):
 async def index(request: Request):
     """Render the legacy OneClick notebook request page."""
     return templates.TemplateResponse(
-        "index.html",
-        {
+        request=request,
+        name="index.html",
+        context={
             "request": request,
             "images": settings.AVAILABLE_IMAGES,
             "default_image": settings.DEFAULT_IMAGE
@@ -325,8 +327,9 @@ async def github_notebook(
     
     # Render landing page for status tracking
     return templates.TemplateResponse(
-        "github_landing.html",
-        {
+        request=request,
+        name="github_landing.html",
+        context={
             "request": request,
             "github_org": github_info["org"],
             "github_repo": github_info["repo"],
@@ -463,8 +466,9 @@ async def check_github_status(instance_id: str = Query(...)):
 async def admin_page(request: Request, username: str = Depends(verify_admin)):
     """Render the admin management page"""
     return templates.TemplateResponse(
-        "admin.html",
-        {
+        request=request,
+        name="admin.html",
+        context={
             "request": request,
             "username": username
         }
