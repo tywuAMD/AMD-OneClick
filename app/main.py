@@ -146,6 +146,7 @@ async def request_notebook(
     """Request a notebook instance"""
     email = req.email.lower()
     image = req.image or settings.DEFAULT_IMAGE
+    owner_username = (req.owner_username or "").strip() or None
     reservation_end_at = req.reservation_end_at
     reservation_end_at_iso = None
     if reservation_end_at:
@@ -166,6 +167,8 @@ async def request_notebook(
         if existing:
             if reservation_end_at_iso:
                 k8s_client.update_instance_reservation_end(email, reservation_end_at_iso)
+            if owner_username:
+                k8s_client.update_instance_owner_username(email, owner_username)
 
             status = k8s_client.get_pod_status(email)
             
@@ -198,7 +201,8 @@ async def request_notebook(
         instance = k8s_client.create_instance(
             email,
             image,
-            reservation_end_at=reservation_end_at_iso
+            reservation_end_at=reservation_end_at_iso,
+            owner_username=owner_username
         )
         
         # Send email notification (async, don't wait)
@@ -485,6 +489,7 @@ async def list_instances(username: str = Depends(verify_admin)):
             NotebookListItem(
                 id=inst["id"],
                 email=inst["email"],
+                owner_username=inst.get("owner_username"),
                 pod_name=inst["pod_name"],
                 url=inst.get("url", ""),
                 status=inst["status"],

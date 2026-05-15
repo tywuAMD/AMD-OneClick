@@ -353,6 +353,7 @@
                 <thead>
                     <tr>
                         <th>Source</th>
+                        <th>Owner</th>
                         <th>Status</th>
                         <th>URL</th>
                         <th>Created</th>
@@ -362,7 +363,7 @@
                 </thead>
                 <tbody id="instancesTable">
                     <tr>
-                        <td colspan="6">
+                        <td colspan="7">
                             <div class="empty-state">
                                 <div class="empty-state-icon">📭</div>
                                 <p>No instances found</p>
@@ -434,7 +435,7 @@
             if (!instances || instances.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="6">
+                        <td colspan="7">
                             <div class="empty-state">
                                 <div class="empty-state-icon">📭</div>
                                 <p>No instances found</p>
@@ -446,6 +447,10 @@
             }
 
             tbody.innerHTML = instances.map(instance => {
+                const ownerDisplay = instance.owner_username
+                    ? `<span style="font-weight: 500;">${escapeHtml(instance.owner_username)}</span>`
+                    : '<span style="color: #999;">-</span>';
+
                 // Determine source display - GitHub or Email
                 let sourceDisplay;
                 if (instance.github_org && instance.github_repo) {
@@ -473,6 +478,7 @@
                 return `
                     <tr>
                         <td>${sourceDisplay}</td>
+                        <td>${ownerDisplay}</td>
                         <td>
                             <span class="status-badge status-${instance.status}">
                                 ${instance.status}

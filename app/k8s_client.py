@@ -62,7 +62,8 @@ class K8sClient:
     
     def _get_pod_manifest(self, email: str, instance_id: str, image: str, 
                           github_info: Optional[dict] = None,
-                          reservation_end_at: Optional[str] = None) -> dict:
+                          reservation_end_at: Optional[str] = None,
+                          owner_username: Optional[str] = None) -> dict:
         """Generate Pod manifest"""
         labels = self._get_labels(email, instance_id)
         
@@ -70,6 +71,10 @@ class K8sClient:
             "amd-oneclick/email": email,
             "amd-oneclick/created-at": datetime.now(timezone.utc).isoformat(),
         }
+
+        normalized_owner_username = (owner_username or "").strip()
+        if normalized_owner_username:
+            annotations["amd-oneclick/owner-username"] = normalized_owner_username
 
         if reservation_end_at:
             annotations["amd-oneclick/reservation-end-at"] = reservation_end_at
@@ -290,6 +295,7 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
             return {
                 "id": instance_id,
                 "email": email,
+                "owner_username": annotations.get("amd-oneclick/owner-username"),
                 "pod_name": pod.metadata.name,
                 "service_name": f"{instance_id}-svc",
                 "image": pod.spec.containers[0].image,
@@ -316,7 +322,8 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
     def create_instance(self, email: str, image: Optional[str] = None, 
                         github_info: Optional[dict] = None,
                         custom_instance_id: Optional[str] = None,
-                        reservation_end_at: Optional[str] = None) -> dict:
+                        reservation_end_at: Optional[str] = None,
+                        owner_username: Optional[str] = None) -> dict:
         """Create a new notebook instance"""
         instance_id = custom_instance_id or self._generate_instance_id(email)
         image = image or settings.DEFAULT_IMAGE
@@ -335,7 +342,8 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
             instance_id,
             image,
             github_info,
-            reservation_end_at=reservation_end_at
+            reservation_end_at=reservation_end_at,
+            owner_username=owner_username
         )
         try:
             self.core_v1.create_namespaced_pod(
@@ -366,6 +374,7 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
         return {
             "id": instance_id,
             "email": email,
+            "owner_username": (owner_username or "").strip() or None,
             "pod_name": instance_id,
             "service_name": f"{instance_id}-svc",
             "image": image,
@@ -402,6 +411,7 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
             return {
                 "id": instance_id,
                 "email": email,
+                "owner_username": annotations.get("amd-oneclick/owner-username"),
                 "pod_name": pod.metadata.name,
                 "service_name": f"{instance_id}-svc",
                 "image": pod.spec.containers[0].image,
@@ -444,6 +454,36 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
         """Update reservation end timestamp annotation by user email."""
         instance_id = self._generate_instance_id(email)
         return self.update_instance_reservation_end_by_id(instance_id, reservation_end_at)
+
+    def update_instance_owner_username_by_id(self, instance_id: str, owner_username: str) -> bool:
+        """Update owner username annotation for an instance pod."""
+        normalized_owner_username = (owner_username or "").strip()
+        if not normalized_owner_username:
+            return False
+
+        try:
+            self.core_v1.patch_namespaced_pod(
+                name=instance_id,
+                namespace=self.namespace,
+                body={
+                    "metadata": {
+                        "annotations": {
+                            "amd-oneclick/owner-username": normalized_owner_username
+                        }
+                    }
+                }
+            )
+            return True
+        except ApiException as e:
+            if e.status == 404:
+                return False
+            logger.warning("Failed to patch owner username for %s: %s", instance_id, e)
+            return False
+
+    def update_instance_owner_username(self, email: str, owner_username: str) -> bool:
+        """Update owner username annotation by user email."""
+        instance_id = self._generate_instance_id(email)
+        return self.update_instance_owner_username_by_id(instance_id, owner_username)
     
     def delete_instance_by_id(self, instance_id: str) -> bool:
         """Delete a notebook instance by instance ID"""
@@ -494,6 +534,7 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                 instance_id = pod.metadata.labels.get("instance-id", "unknown")
                 annotations = pod.metadata.annotations or {}
                 email = annotations.get("amd-oneclick/email", "unknown")
+                owner_username = annotations.get("amd-oneclick/owner-username")
                 created_at = pod.metadata.creation_timestamp
                 
                 # Get GitHub info from annotations
@@ -501,6 +542,9 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                 github_repo = annotations.get("amd-oneclick/github-repo")
                 github_path = annotations.get("amd-oneclick/github-path")
                 reservation_end_at = annotations.get("amd-oneclick/reservation-end-at")
+
+                if (not owner_username) and email and email != "unknown" and "@" in email and not github_org:
+                    owner_username = email.split("@", 1)[0]
                 
                 # Get NodePort from service
                 node_port = None
@@ -522,6 +566,7 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                 instances.append({
                     "id": instance_id,
                     "email": email,
+                    "owner_username": owner_username,
                     "pod_name": pod.metadata.name,
                     "service_name": f"{instance_id}-svc",
                     "image": pod.spec.containers[0].image if pod.spec.containers else "unknown",

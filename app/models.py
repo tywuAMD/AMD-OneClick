@@ -10,6 +10,7 @@ class NotebookRequest(BaseModel):
     """Request model for creating a notebook instance"""
     email: EmailStr
     image: Optional[str] = None
+    owner_username: Optional[str] = None
     reservation_end_at: Optional[datetime] = None
 
 
@@ -58,6 +59,7 @@ class NotebookListItem(BaseModel):
     """Item in the notebook list for admin view"""
     id: str
     email: str
+    owner_username: Optional[str] = None
     pod_name: str
     url: str
     status: str
