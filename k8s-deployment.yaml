@@ -45,7 +45,7 @@ data:
   K8S_NAMESPACE: "default"
   DEFAULT_IMAGE: "docker.io/rocm/vllm:rocm7.12.0_gfx110X-all_ubuntu24.04_py3.12_pytorch_2.9.1_vllm_0.16.0"
   CPU_LIMIT: "128"
-  MEMORY_LIMIT: "256Gi"
+  MEMORY_LIMIT: "128Gi"
   GPU_LIMIT: "8"
   CPU_REQUEST: "40"
   MEMORY_REQUEST: "48Gi"

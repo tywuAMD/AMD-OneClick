@@ -96,6 +96,12 @@ trusted-host = {settings.PYPI_HOST}
 EOF
 pip install --no-cache-dir jupyter ihighlight
 mkdir -p /app/notebooks
+if [ -d "{settings.PUBLIC_MODELS_MOUNT_PATH}" ] && [ ! -e /app/models ]; then
+  ln -s "{settings.PUBLIC_MODELS_MOUNT_PATH}" /app/models
+fi
+if [ -d "{settings.PUBLIC_MODELS_MOUNT_PATH}" ] && [ ! -e /app/notebooks/models ]; then
+  ln -s "{settings.PUBLIC_MODELS_MOUNT_PATH}" /app/notebooks/models
+fi
 cd /app/notebooks
 python -c "
 import urllib.request
@@ -119,6 +125,9 @@ index-url = {settings.PYPI_MIRROR}
 trusted-host = {settings.PYPI_HOST}
 EOF
 pip install --no-cache-dir jupyter ihighlight
+if [ -d "{settings.PUBLIC_MODELS_MOUNT_PATH}" ] && [ ! -e /app/models ]; then
+  ln -s "{settings.PUBLIC_MODELS_MOUNT_PATH}" /app/models
+fi
 cd /app
 jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-root --ServerApp.token='{settings.NOTEBOOK_TOKEN}'
 """

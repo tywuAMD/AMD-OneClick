@@ -37,7 +37,7 @@ class Settings:
     
     # Resource Limits
     CPU_LIMIT: str = os.getenv("CPU_LIMIT", "128")
-    MEMORY_LIMIT: str = os.getenv("MEMORY_LIMIT", "256Gi")
+    MEMORY_LIMIT: str = os.getenv("MEMORY_LIMIT", "128Gi")
     GPU_LIMIT: str = os.getenv("GPU_LIMIT", "1")
     CPU_REQUEST: str = os.getenv("CPU_REQUEST", "40")
     MEMORY_REQUEST: str = os.getenv("MEMORY_REQUEST", "48Gi")
