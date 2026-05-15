@@ -31,6 +31,9 @@ class Settings:
     NOTEBOOK_TOKEN: str = os.getenv("NOTEBOOK_TOKEN", "amd-oneclick")
     NOTEBOOK_PORT: int = 8888
     NOTEBOOK_LABEL_PREFIX: str = "amd-oneclick"
+    NOTEBOOK_NODE_HOSTNAME: Optional[str] = os.getenv("NOTEBOOK_NODE_HOSTNAME")
+    PUBLIC_MODELS_HOST_PATH: str = os.getenv("PUBLIC_MODELS_HOST_PATH", "/models")
+    PUBLIC_MODELS_MOUNT_PATH: str = os.getenv("PUBLIC_MODELS_MOUNT_PATH", "/models")
     
     # Resource Limits
     CPU_LIMIT: str = os.getenv("CPU_LIMIT", "128")

@@ -133,6 +133,14 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                 "annotations": annotations
             },
             "spec": {
+                **(
+                    {
+                        "nodeSelector": {
+                            "kubernetes.io/hostname": settings.NOTEBOOK_NODE_HOSTNAME
+                        }
+                    }
+                    if settings.NOTEBOOK_NODE_HOSTNAME else {}
+                ),
                 "tolerations": [
                     {
                         "key": "amd.com/gpu",
@@ -170,7 +178,12 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                             {"name": "USER_EMAIL", "value": email}
                         ],
                         "volumeMounts": [
-                            {"name": "shm", "mountPath": "/dev/shm"}
+                            {"name": "shm", "mountPath": "/dev/shm"},
+                            {
+                                "name": "public-models",
+                                "mountPath": settings.PUBLIC_MODELS_MOUNT_PATH,
+                                "readOnly": True
+                            }
                         ]
                     }
                 ],
@@ -180,6 +193,13 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                         "emptyDir": {
                             "medium": "Memory",
                             "sizeLimit": "64Gi"
+                        }
+                    },
+                    {
+                        "name": "public-models",
+                        "hostPath": {
+                            "path": settings.PUBLIC_MODELS_HOST_PATH,
+                            "type": "DirectoryOrCreate"
                         }
                     }
                 ],
