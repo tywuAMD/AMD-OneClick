@@ -3,6 +3,7 @@ Kubernetes client for managing notebook instances
 """
 import hashlib
 import logging
+import os
 import socket
 from datetime import datetime, timezone
 from typing import Optional
@@ -14,24 +15,71 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
+SERVICE_ACCOUNT_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+SERVICE_ACCOUNT_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+
 
 class K8sClient:
     """Kubernetes client for notebook management"""
     
     def __init__(self):
         """Initialize K8s client"""
-        try:
-            # Try in-cluster config first (when running inside K8s)
-            config.load_incluster_config()
-            logger.info("Loaded in-cluster K8s config")
-        except config.ConfigException:
-            # Fall back to kubeconfig file
-            config.load_kube_config()
-            logger.info("Loaded kubeconfig file")
+        has_service_account_token = os.path.exists(SERVICE_ACCOUNT_TOKEN_PATH)
+        has_kubernetes_host = bool(os.getenv("KUBERNETES_SERVICE_HOST"))
+
+        if has_service_account_token:
+            try:
+                # Prefer official in-cluster config when service-account token is present.
+                config.load_incluster_config()
+                logger.info("Loaded in-cluster K8s config")
+            except config.ConfigException as error:
+                logger.warning(
+                    "load_incluster_config failed (%s). Falling back to manual token mode.",
+                    error
+                )
+                self._load_manual_incluster_config()
+                logger.info("Loaded in-cluster K8s config (manual token mode)")
+        elif has_kubernetes_host:
+            # We appear to be in-cluster but token is missing: fail fast to avoid anonymous access.
+            raise RuntimeError(
+                "KUBERNETES_SERVICE_HOST is set but service-account token is missing. "
+                "Ensure automountServiceAccountToken is enabled."
+            )
+        else:
+            try:
+                config.load_kube_config()
+                logger.info("Loaded kubeconfig file")
+            except config.ConfigException as error:
+                raise RuntimeError(
+                    "Kubernetes config not found for local development. "
+                    "Set up kubeconfig or run inside a cluster."
+                ) from error
         
         self.core_v1 = client.CoreV1Api()
         self.apps_v1 = client.AppsV1Api()
         self.namespace = settings.K8S_NAMESPACE
+
+    def _load_manual_incluster_config(self):
+        """Build Kubernetes client config directly from mounted service-account token."""
+        if not os.path.exists(SERVICE_ACCOUNT_TOKEN_PATH):
+            raise RuntimeError("Service-account token file is missing.")
+
+        with open(SERVICE_ACCOUNT_TOKEN_PATH, "r", encoding="utf-8") as token_file:
+            token = token_file.read().strip()
+        if not token:
+            raise RuntimeError("Service-account token file is empty.")
+
+        host = os.getenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
+        port = os.getenv("KUBERNETES_SERVICE_PORT_HTTPS") or os.getenv("KUBERNETES_SERVICE_PORT", "443")
+
+        configuration = client.Configuration.get_default_copy()
+        configuration.host = f"https://{host}:{port}"
+        configuration.verify_ssl = True
+        if os.path.exists(SERVICE_ACCOUNT_CA_PATH):
+            configuration.ssl_ca_cert = SERVICE_ACCOUNT_CA_PATH
+        configuration.api_key = {"authorization": token}
+        configuration.api_key_prefix = {"authorization": "Bearer"}
+        client.Configuration.set_default(configuration)
     
     def _generate_instance_id(self, email: str) -> str:
         """Generate a unique instance ID from email"""
