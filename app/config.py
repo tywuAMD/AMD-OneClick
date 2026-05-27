@@ -45,6 +45,7 @@ class Settings:
     # Cleanup Configuration
     IDLE_TIMEOUT_MINUTES: int = int(os.getenv("IDLE_TIMEOUT_MINUTES", "10"))
     MAX_LIFETIME_HOURS: int = int(os.getenv("MAX_LIFETIME_HOURS", "6"))
+    DISABLE_CLEANUP: bool = _parse_bool("DISABLE_CLEANUP", False)
     
     # Email Configuration (optional)
     SMTP_HOST: Optional[str] = os.getenv("SMTP_HOST")

@@ -15,6 +15,13 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import secrets
 
+# Configure logging early so import-time module logs are visible.
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 from .config import settings
 from .models import (
     NotebookRequest, 
@@ -27,13 +34,6 @@ from .models import (
 from .k8s_client import k8s_client
 from .email_service import send_notebook_url_email
 from .scheduler import start_scheduler, stop_scheduler
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager

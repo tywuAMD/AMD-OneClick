@@ -17,6 +17,10 @@ scheduler = AsyncIOScheduler()
 
 async def cleanup_job():
     """Periodic job to cleanup idle and expired instances"""
+    if settings.DISABLE_CLEANUP:
+        logger.info("Cleanup job skipped because DISABLE_CLEANUP=true")
+        return
+
     from .k8s_client import k8s_client
     
     logger.info("Running cleanup job...")

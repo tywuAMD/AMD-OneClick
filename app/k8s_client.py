@@ -24,21 +24,15 @@ class K8sClient:
     
     def __init__(self):
         """Initialize K8s client"""
+        self._service_account_token: Optional[str] = None
         has_service_account_token = os.path.exists(SERVICE_ACCOUNT_TOKEN_PATH)
         has_kubernetes_host = bool(os.getenv("KUBERNETES_SERVICE_HOST"))
 
         if has_service_account_token:
-            try:
-                # Prefer official in-cluster config when service-account token is present.
-                config.load_incluster_config()
-                logger.info("Loaded in-cluster K8s config")
-            except config.ConfigException as error:
-                logger.warning(
-                    "load_incluster_config failed (%s). Falling back to manual token mode.",
-                    error
-                )
-                self._load_manual_incluster_config()
-                logger.info("Loaded in-cluster K8s config (manual token mode)")
+            # Always use manual in-cluster config to avoid token formatting ambiguity
+            # from library defaults (for example newline/prefix handling).
+            self._load_manual_incluster_config()
+            logger.info("Loaded in-cluster K8s config (manual token mode)")
         elif has_kubernetes_host:
             # We appear to be in-cluster but token is missing: fail fast to avoid anonymous access.
             raise RuntimeError(
@@ -55,8 +49,14 @@ class K8sClient:
                     "Set up kubeconfig or run inside a cluster."
                 ) from error
         
-        self.core_v1 = client.CoreV1Api()
-        self.apps_v1 = client.AppsV1Api()
+        api_client = client.ApiClient()
+        if self._service_account_token:
+            # Force auth header at client level to avoid generator auth_settings mismatches.
+            api_client.default_headers["authorization"] = f"Bearer {self._service_account_token}"
+            logger.info("Configured explicit bearer token on Kubernetes ApiClient headers")
+
+        self.core_v1 = client.CoreV1Api(api_client)
+        self.apps_v1 = client.AppsV1Api(api_client)
         self.namespace = settings.K8S_NAMESPACE
 
     def _load_manual_incluster_config(self):
@@ -68,8 +68,10 @@ class K8sClient:
             token = token_file.read().strip()
         if not token:
             raise RuntimeError("Service-account token file is empty.")
+        self._service_account_token = token
 
         host = os.getenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
+        host = host.replace("https://", "").replace("http://", "")
         port = os.getenv("KUBERNETES_SERVICE_PORT_HTTPS") or os.getenv("KUBERNETES_SERVICE_PORT", "443")
 
         configuration = client.Configuration.get_default_copy()
@@ -77,8 +79,10 @@ class K8sClient:
         configuration.verify_ssl = True
         if os.path.exists(SERVICE_ACCOUNT_CA_PATH):
             configuration.ssl_ca_cert = SERVICE_ACCOUNT_CA_PATH
-        configuration.api_key = {"authorization": token}
-        configuration.api_key_prefix = {"authorization": "Bearer"}
+        # Write a complete bearer value directly so request auth cannot depend
+        # on api_key_prefix behavior across kubernetes-client versions.
+        configuration.api_key = {"authorization": f"Bearer {token}"}
+        configuration.api_key_prefix = {}
         client.Configuration.set_default(configuration)
     
     def _generate_instance_id(self, email: str) -> str:
