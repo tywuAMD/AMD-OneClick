@@ -1,0 +1,93 @@
+# AMD OneClick Notebook Manager - Node#2 Canary Deployment
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: amd-oneclick-config-canary
+  namespace: default
+data:
+  K8S_NAMESPACE: "default"
+  DEFAULT_IMAGE: "docker.io/rocm/vllm:rocm7.12.0_gfx110X-all_ubuntu24.04_py3.12_pytorch_2.9.1_vllm_0.16.0"
+  CPU_LIMIT: "128"
+  MEMORY_LIMIT: "128Gi"
+  GPU_LIMIT: "8"
+  CPU_REQUEST: "40"
+  MEMORY_REQUEST: "48Gi"
+  IDLE_TIMEOUT_MINUTES: "10"
+  MAX_LIFETIME_HOURS: "6"
+  DISABLE_CLEANUP: "true"
+  SERVICE_HOST: "36.150.116.245"
+  NODE_PORT_BASE: "30100"
+  NOTEBOOK_TOKEN: "amd-oneclick"
+  NOTEBOOK_LABEL_PREFIX: "amd-oneclick-canary"
+  NOTEBOOK_NODE_HOSTNAME: "wx-ms-w7900d-0027"
+  NOTEBOOK_PLATFORM_NODE_MAP: "Node#1=wx-ms-w7900d-0027,Node#2=wx-ms-w7900d-0023"
+  NOTEBOOK_TOLERATE_UNSCHEDULABLE: "true"
+  PUBLIC_MODELS_HOST_PATH: "/models"
+  PUBLIC_MODELS_MOUNT_PATH: "/models"
+  RESERVATION_API_BASE_URL: "http://36.150.116.245:4100/api"
+  ALLOW_PUBLIC_NOTEBOOK_API: "true"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amd-oneclick-manager-canary
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: amd-oneclick-manager-canary
+  template:
+    metadata:
+      labels:
+        app: amd-oneclick-manager-canary
+    spec:
+      serviceAccountName: amd-oneclick-manager
+      containers:
+        - name: manager
+          image: tyamd/cie2026:node2-canary
+          imagePullPolicy: IfNotPresent
+          workingDir: /app
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: amd-oneclick-config-canary
+            - secretRef:
+                name: amd-oneclick-secrets
+          resources:
+            limits:
+              cpu: "2"
+              memory: "1Gi"
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 120
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: amd-oneclick-manager-canary
+  namespace: default
+spec:
+  selector:
+    app: amd-oneclick-manager-canary
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 8000
+      nodePort: 30082

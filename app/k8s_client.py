@@ -19,6 +19,10 @@ SERVICE_ACCOUNT_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/toke
 SERVICE_ACCOUNT_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 
 
+def _normalize_platform_key(value: Optional[str]) -> str:
+    return "".join(char for char in (value or "").strip().lower() if char.isalnum())
+
+
 class K8sClient:
     """Kubernetes client for notebook management"""
     
@@ -111,13 +115,29 @@ class K8sClient:
         except ValueError:
             logger.warning("Invalid ISO timestamp: %s", value)
             return None
+
+    def _resolve_notebook_node_hostname(self, platform: Optional[str] = None) -> Optional[str]:
+        """Resolve a reservation platform name to the Kubernetes node hostname."""
+        normalized_platform = (platform or "").strip()
+        if normalized_platform:
+            platform_key = _normalize_platform_key(normalized_platform)
+            mapped_hostname = settings.NOTEBOOK_PLATFORM_NODE_MAP.get(platform_key)
+            if mapped_hostname:
+                return mapped_hostname
+
+            if settings.NOTEBOOK_PLATFORM_NODE_MAP:
+                raise ValueError(f'No notebook node mapping configured for platform "{normalized_platform}".')
+
+        return settings.NOTEBOOK_NODE_HOSTNAME
     
     def _get_pod_manifest(self, email: str, instance_id: str, image: str, 
                           github_info: Optional[dict] = None,
                           reservation_end_at: Optional[str] = None,
-                          owner_username: Optional[str] = None) -> dict:
+                          owner_username: Optional[str] = None,
+                          platform: Optional[str] = None) -> dict:
         """Generate Pod manifest"""
         labels = self._get_labels(email, instance_id)
+        target_node_hostname = self._resolve_notebook_node_hostname(platform)
         
         annotations = {
             "amd-oneclick/email": email,
@@ -130,6 +150,13 @@ class K8sClient:
 
         if reservation_end_at:
             annotations["amd-oneclick/reservation-end-at"] = reservation_end_at
+
+        normalized_platform = (platform or "").strip()
+        if normalized_platform:
+            annotations["amd-oneclick/platform"] = normalized_platform
+
+        if target_node_hostname:
+            annotations["amd-oneclick/target-node-hostname"] = target_node_hostname
         
         # Add GitHub info to annotations if provided
         if github_info:
@@ -138,6 +165,20 @@ class K8sClient:
             annotations["amd-oneclick/github-branch"] = github_info.get("branch", "")
             annotations["amd-oneclick/github-path"] = github_info.get("path", "")
             annotations["amd-oneclick/github-raw-url"] = github_info.get("raw_url", "")
+
+        tolerations = [
+            {
+                "key": "amd.com/gpu",
+                "operator": "Exists",
+                "effect": "NoSchedule"
+            }
+        ]
+        if settings.NOTEBOOK_TOLERATE_UNSCHEDULABLE:
+            tolerations.append({
+                "key": "node.kubernetes.io/unschedulable",
+                "operator": "Exists",
+                "effect": "NoSchedule"
+            })
         
         # Build the startup command
         if github_info:
@@ -202,18 +243,12 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                 **(
                     {
                         "nodeSelector": {
-                            "kubernetes.io/hostname": settings.NOTEBOOK_NODE_HOSTNAME
+                            "kubernetes.io/hostname": target_node_hostname
                         }
                     }
-                    if settings.NOTEBOOK_NODE_HOSTNAME else {}
+                    if target_node_hostname else {}
                 ),
-                "tolerations": [
-                    {
-                        "key": "amd.com/gpu",
-                        "operator": "Exists",
-                        "effect": "NoSchedule"
-                    }
-                ],
+                "tolerations": tolerations,
                 "containers": [
                     {
                         "name": "notebook",
@@ -354,6 +389,8 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                 "status": pod.status.phase.lower(),
                 "created_at": pod.metadata.creation_timestamp,
                 "reservation_end_at": annotations.get("amd-oneclick/reservation-end-at"),
+                "platform": annotations.get("amd-oneclick/platform"),
+                "target_node_hostname": annotations.get("amd-oneclick/target-node-hostname"),
                 "node_port": node_port,
                 "url": self._build_url(node_port) if node_port else None
             }
@@ -375,7 +412,8 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                         github_info: Optional[dict] = None,
                         custom_instance_id: Optional[str] = None,
                         reservation_end_at: Optional[str] = None,
-                        owner_username: Optional[str] = None) -> dict:
+                        owner_username: Optional[str] = None,
+                        platform: Optional[str] = None) -> dict:
         """Create a new notebook instance"""
         instance_id = custom_instance_id or self._generate_instance_id(email)
         image = image or settings.DEFAULT_IMAGE
@@ -395,7 +433,8 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
             image,
             github_info,
             reservation_end_at=reservation_end_at,
-            owner_username=owner_username
+            owner_username=owner_username,
+            platform=platform
         )
         try:
             self.core_v1.create_namespaced_pod(
@@ -433,6 +472,8 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
             "status": "pending",
             "created_at": datetime.now(timezone.utc),
             "reservation_end_at": reservation_end_at,
+            "platform": (platform or "").strip() or None,
+            "target_node_hostname": self._resolve_notebook_node_hostname(platform),
             "node_port": node_port,
             "url": self._build_url(node_port, notebook_path),
             "github_info": github_info
@@ -470,6 +511,8 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                 "status": pod.status.phase.lower(),
                 "created_at": pod.metadata.creation_timestamp,
                 "reservation_end_at": annotations.get("amd-oneclick/reservation-end-at"),
+                "platform": annotations.get("amd-oneclick/platform"),
+                "target_node_hostname": annotations.get("amd-oneclick/target-node-hostname"),
                 "node_port": node_port,
                 "url": self._build_url(node_port, github_path) if node_port else None,
                 "github_org": annotations.get("amd-oneclick/github-org"),
@@ -594,6 +637,8 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                 github_repo = annotations.get("amd-oneclick/github-repo")
                 github_path = annotations.get("amd-oneclick/github-path")
                 reservation_end_at = annotations.get("amd-oneclick/reservation-end-at")
+                platform = annotations.get("amd-oneclick/platform")
+                target_node_hostname = annotations.get("amd-oneclick/target-node-hostname")
 
                 if (not owner_username) and email and email != "unknown" and "@" in email and not github_org:
                     owner_username = email.split("@", 1)[0]
@@ -625,6 +670,8 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                     "status": pod.status.phase.lower() if pod.status.phase else "unknown",
                     "created_at": created_at.isoformat() if created_at else None,
                     "reservation_end_at": reservation_end_at,
+                    "platform": platform,
+                    "target_node_hostname": target_node_hostname,
                     "node_port": node_port,
                     "url": self._build_url(node_port, github_path) if node_port else None,
                     "uptime_minutes": uptime_minutes,

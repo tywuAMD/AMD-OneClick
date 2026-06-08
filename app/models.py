@@ -12,6 +12,7 @@ class NotebookRequest(BaseModel):
     image: Optional[str] = None
     owner_username: Optional[str] = None
     reservation_end_at: Optional[datetime] = None
+    platform: Optional[str] = None
 
 
 class GitHubNotebookInfo(BaseModel):

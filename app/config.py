@@ -12,6 +12,26 @@ def _parse_bool(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _normalize_platform_key(value: Optional[str]) -> str:
+    return "".join(char for char in (value or "").strip().lower() if char.isalnum())
+
+
+def _parse_platform_node_map(name: str) -> dict[str, str]:
+    value = os.getenv(name, "")
+    mapping: dict[str, str] = {}
+
+    for entry in value.split(","):
+        if "=" not in entry:
+            continue
+        platform, hostname = entry.split("=", 1)
+        platform_key = _normalize_platform_key(platform)
+        normalized_hostname = hostname.strip()
+        if platform_key and normalized_hostname:
+            mapping[platform_key] = normalized_hostname
+
+    return mapping
+
+
 class Settings:
     # K8s Configuration
     K8S_NAMESPACE: str = os.getenv("K8S_NAMESPACE", "default")
@@ -30,8 +50,10 @@ class Settings:
     # Notebook Configuration
     NOTEBOOK_TOKEN: str = os.getenv("NOTEBOOK_TOKEN", "amd-oneclick")
     NOTEBOOK_PORT: int = 8888
-    NOTEBOOK_LABEL_PREFIX: str = "amd-oneclick"
+    NOTEBOOK_LABEL_PREFIX: str = os.getenv("NOTEBOOK_LABEL_PREFIX", "amd-oneclick")
     NOTEBOOK_NODE_HOSTNAME: Optional[str] = os.getenv("NOTEBOOK_NODE_HOSTNAME")
+    NOTEBOOK_PLATFORM_NODE_MAP: dict[str, str] = _parse_platform_node_map("NOTEBOOK_PLATFORM_NODE_MAP")
+    NOTEBOOK_TOLERATE_UNSCHEDULABLE: bool = _parse_bool("NOTEBOOK_TOLERATE_UNSCHEDULABLE", False)
     PUBLIC_MODELS_HOST_PATH: str = os.getenv("PUBLIC_MODELS_HOST_PATH", "/models")
     PUBLIC_MODELS_MOUNT_PATH: str = os.getenv("PUBLIC_MODELS_MOUNT_PATH", "/models")
     

@@ -147,6 +147,7 @@ async def request_notebook(
     email = req.email.lower()
     image = req.image or settings.DEFAULT_IMAGE
     owner_username = (req.owner_username or "").strip() or None
+    platform = (req.platform or "").strip() or None
     reservation_end_at = req.reservation_end_at
     reservation_end_at_iso = None
     if reservation_end_at:
@@ -202,7 +203,8 @@ async def request_notebook(
             email,
             image,
             reservation_end_at=reservation_end_at_iso,
-            owner_username=owner_username
+            owner_username=owner_username,
+            platform=platform
         )
         
         # Send email notification (async, don't wait)
@@ -215,6 +217,8 @@ async def request_notebook(
             url=instance.get("url"),
             email=email
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
         
     except Exception as e:
         logger.error(f"Error creating notebook for {email}: {e}")
