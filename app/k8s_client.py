@@ -192,7 +192,8 @@ cat > ~/.pip/pip.conf << EOF
 index-url = {settings.PYPI_MIRROR}
 trusted-host = {settings.PYPI_HOST}
 EOF
-pip install --no-cache-dir jupyter ihighlight
+unset PIP_EXTRA_INDEX_URL
+pip install --no-cache-dir --index-url {settings.PYPI_MIRROR} --trusted-host {settings.PYPI_HOST} jupyter ihighlight
 mkdir -p /app/notebooks
 if [ -d "{settings.PUBLIC_MODELS_MOUNT_PATH}" ] && [ ! -e /app/models ]; then
   ln -s "{settings.PUBLIC_MODELS_MOUNT_PATH}" /app/models
@@ -222,7 +223,8 @@ cat > ~/.pip/pip.conf << EOF
 index-url = {settings.PYPI_MIRROR}
 trusted-host = {settings.PYPI_HOST}
 EOF
-pip install --no-cache-dir jupyter ihighlight
+unset PIP_EXTRA_INDEX_URL
+pip install --no-cache-dir --index-url {settings.PYPI_MIRROR} --trusted-host {settings.PYPI_HOST} jupyter ihighlight
 if [ -d "{settings.PUBLIC_MODELS_MOUNT_PATH}" ] && [ ! -e /app/models ]; then
   ln -s "{settings.PUBLIC_MODELS_MOUNT_PATH}" /app/models
 fi
