@@ -89,9 +89,13 @@ class K8sClient:
         configuration.api_key_prefix = {}
         client.Configuration.set_default(configuration)
     
+    def _generate_email_hash(self, email: str, length: int = 16) -> str:
+        """Generate a deterministic hash used for labels and IDs."""
+        return hashlib.md5(email.lower().encode()).hexdigest()[:length]
+
     def _generate_instance_id(self, email: str) -> str:
         """Generate a unique instance ID from email"""
-        hash_str = hashlib.md5(email.lower().encode()).hexdigest()[:8]
+        hash_str = self._generate_email_hash(email, length=8)
         return f"nb-{hash_str}"
     
     def _get_labels(self, email: str, instance_id: str) -> dict:
@@ -99,7 +103,7 @@ class K8sClient:
         return {
             "app": settings.NOTEBOOK_LABEL_PREFIX,
             "instance-id": instance_id,
-            "email-hash": hashlib.md5(email.lower().encode()).hexdigest()[:16],
+            "email-hash": self._generate_email_hash(email),
         }
 
     def _parse_iso_datetime(self, value: Optional[str]) -> Optional[datetime]:
@@ -598,10 +602,33 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
         """Update owner username annotation by user email."""
         instance_id = self._generate_instance_id(email)
         return self.update_instance_owner_username_by_id(instance_id, owner_username)
+
+    def _find_instance_id_by_email(self, email: str) -> Optional[str]:
+        """Find the current instance ID for an email from pod labels."""
+        email_hash = self._generate_email_hash(email)
+        try:
+            pods = self.core_v1.list_namespaced_pod(
+                namespace=self.namespace,
+                label_selector=(
+                    f"app={settings.NOTEBOOK_LABEL_PREFIX},"
+                    f"email-hash={email_hash}"
+                )
+            )
+        except ApiException as e:
+            logger.warning("Failed to resolve instance for %s: %s", email, e)
+            return None
+
+        if not pods.items:
+            return None
+
+        pod = pods.items[0]
+        labels = pod.metadata.labels or {}
+        return labels.get("instance-id") or pod.metadata.name
     
     def delete_instance_by_id(self, instance_id: str) -> bool:
         """Delete a notebook instance by instance ID"""
-        deleted = False
+        service_deleted = False
+        pod_deleted = False
         
         # Delete Service
         try:
@@ -610,29 +637,45 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
                 namespace=self.namespace
             )
             logger.info(f"Deleted service {instance_id}-svc")
-            deleted = True
+            service_deleted = True
         except ApiException as e:
-            if e.status != 404:
-                logger.warning(f"Error deleting service: {e}")
+            if e.status == 404:
+                service_deleted = True
+            else:
+                logger.warning(f"Error deleting service {instance_id}-svc: {e}")
         
         # Delete Pod
         try:
+            delete_options = client.V1DeleteOptions(
+                grace_period_seconds=0,
+                propagation_policy="Background"
+            )
             self.core_v1.delete_namespaced_pod(
                 name=instance_id,
-                namespace=self.namespace
+                namespace=self.namespace,
+                grace_period_seconds=0,
+                body=delete_options
             )
-            logger.info(f"Deleted pod {instance_id}")
-            deleted = True
+            logger.info(f"Deleted pod {instance_id} (force mode)")
+            pod_deleted = True
         except ApiException as e:
-            if e.status != 404:
-                logger.warning(f"Error deleting pod: {e}")
-        
-        return deleted
+            if e.status == 404:
+                pod_deleted = True
+            else:
+                logger.warning(f"Error deleting pod {instance_id}: {e}")
+
+        return service_deleted and pod_deleted
     
     def delete_instance(self, email: str) -> bool:
         """Delete a notebook instance"""
-        instance_id = self._generate_instance_id(email)
-        return self.delete_instance_by_id(instance_id)
+        generated_instance_id = self._generate_instance_id(email)
+        deleted = self.delete_instance_by_id(generated_instance_id)
+
+        resolved_instance_id = self._find_instance_id_by_email(email)
+        if resolved_instance_id and resolved_instance_id != generated_instance_id:
+            deleted = self.delete_instance_by_id(resolved_instance_id) or deleted
+
+        return deleted
     
     def list_instances(self) -> list:
         """List all notebook instances"""
@@ -645,7 +688,8 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
             )
             
             for pod in pods.items:
-                instance_id = pod.metadata.labels.get("instance-id", "unknown")
+                labels = pod.metadata.labels or {}
+                instance_id = labels.get("instance-id") or pod.metadata.name
                 annotations = pod.metadata.annotations or {}
                 email = annotations.get("amd-oneclick/email", "unknown")
                 owner_username = annotations.get("amd-oneclick/owner-username")
@@ -709,7 +753,8 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
         deleted_count = 0
         
         for instance in instances:
-            if self.delete_instance(instance["email"]):
+            instance_id = instance.get("id") or instance.get("pod_name")
+            if instance_id and self.delete_instance_by_id(instance_id):
                 deleted_count += 1
         
         return deleted_count
@@ -770,10 +815,8 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
             logger.debug(f"Jupyter health check failed: {e}")
             return False
     
-    def check_pod_activity(self, email: str) -> Optional[datetime]:
-        """Check last activity of a pod by examining logs"""
-        instance_id = self._generate_instance_id(email)
-        
+    def check_pod_activity_by_id(self, instance_id: str) -> Optional[datetime]:
+        """Check last activity of a pod by examining logs."""
         try:
             # Get recent logs
             logs = self.core_v1.read_namespaced_pod_log(
@@ -798,6 +841,11 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
             return None
         except ApiException:
             return None
+
+    def check_pod_activity(self, email: str) -> Optional[datetime]:
+        """Check last activity of a pod by email."""
+        instance_id = self._find_instance_id_by_email(email) or self._generate_instance_id(email)
+        return self.check_pod_activity_by_id(instance_id)
     
     def cleanup_idle_instances(self) -> list:
         """Cleanup idle and expired instances"""
@@ -806,6 +854,7 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
         now = datetime.now(timezone.utc)
         
         for instance in instances:
+            instance_id = instance.get("id") or instance.get("pod_name")
             should_delete = False
             reason = ""
             reservation_end_at = self._parse_iso_datetime(instance.get("reservation_end_at"))
@@ -822,20 +871,30 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
             
             # Check idle timeout (only for running instances)
             elif not should_delete and instance["status"] == "running":
-                last_activity = self.check_pod_activity(instance["email"])
+                last_activity = (
+                    self.check_pod_activity_by_id(instance_id)
+                    if instance_id else None
+                )
                 if last_activity:
                     idle_minutes = (now - last_activity).total_seconds() / 60
                     if idle_minutes >= settings.IDLE_TIMEOUT_MINUTES:
                         should_delete = True
                         reason = f"idle for {int(idle_minutes)} minutes"
             
-            if should_delete:
-                if self.delete_instance(instance["email"]):
+            if should_delete and instance_id:
+                if self.delete_instance_by_id(instance_id):
                     cleaned.append({
                         "email": instance["email"],
                         "reason": reason
                     })
                     logger.info(f"Cleaned up instance for {instance['email']}: {reason}")
+                else:
+                    logger.warning(
+                        "Cleanup marked pod %s (%s) but deletion failed: %s",
+                        instance_id,
+                        instance.get("email", "unknown"),
+                        reason
+                    )
         
         return cleaned
 
