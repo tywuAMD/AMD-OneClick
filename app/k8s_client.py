@@ -336,14 +336,27 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
             }
         }
     
-    def _allocate_node_port(self) -> int:
-        """Allocate an available NodePort"""
+    def _resolve_node_port_range(self, platform: Optional[str] = None) -> tuple[int, int]:
+        """Resolve the allowed NodePort range for a reservation platform."""
+        normalized_platform = (platform or "").strip()
+        if normalized_platform:
+            platform_key = _normalize_platform_key(normalized_platform)
+            mapped_range = settings.NOTEBOOK_PLATFORM_PORT_RANGES.get(platform_key)
+            if mapped_range:
+                return mapped_range
+
+            if settings.NOTEBOOK_PLATFORM_PORT_RANGES:
+                raise ValueError(f'No notebook port range configured for platform "{normalized_platform}".')
+
+        return settings.NODE_PORT_BASE, settings.NODE_PORT_END
+
+    def _allocate_node_port(self, platform: Optional[str] = None) -> int:
+        """Allocate an available NodePort within the platform-specific range."""
         used_ports = set()
         
         try:
             services = self.core_v1.list_namespaced_service(
-                namespace=self.namespace,
-                label_selector=f"app={settings.NOTEBOOK_LABEL_PREFIX}"
+                namespace=self.namespace
             )
             for svc in services.items:
                 for port in svc.spec.ports or []:
@@ -352,10 +365,14 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
         except ApiException as e:
             logger.warning(f"Error listing services: {e}")
         
-        # Find available port starting from base
-        port = settings.NODE_PORT_BASE
-        while port in used_ports and port < 32767:
+        # Find available port within the configured range.
+        start_port, end_port = self._resolve_node_port_range(platform)
+        port = start_port
+        while port in used_ports and port <= end_port:
             port += 1
+
+        if port > end_port:
+            raise ValueError(f"No available NodePort in configured range {start_port}-{end_port}.")
         
         return port
     
@@ -426,7 +443,7 @@ jupyter lab --ip=0.0.0.0 --port={settings.NOTEBOOK_PORT} --no-browser --allow-ro
             return existing
         
         # Allocate NodePort
-        node_port = self._allocate_node_port()
+        node_port = self._allocate_node_port(platform)
         
         # Create Pod
         pod_manifest = self._get_pod_manifest(

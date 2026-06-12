@@ -1,0 +1,143 @@
+# AMD OneClick Notebook Manager v2 - Kubernetes Deployment
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: amd-oneclick-manager-v2
+  namespace: default
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: amd-oneclick-manager-v2
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch", "update"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: amd-oneclick-manager-v2
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: amd-oneclick-manager-v2
+subjects:
+  - kind: ServiceAccount
+    name: amd-oneclick-manager-v2
+    namespace: default
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: amd-oneclick-config-v2
+  namespace: default
+data:
+  K8S_NAMESPACE: "default"
+  DEFAULT_IMAGE: "docker.io/rocm/vllm:rocm7.12.0_gfx110X-all_ubuntu24.04_py3.12_pytorch_2.9.1_vllm_0.16.0"
+  CPU_LIMIT: "128"
+  MEMORY_LIMIT: "128Gi"
+  GPU_LIMIT: "8"
+  CPU_REQUEST: "40"
+  MEMORY_REQUEST: "48Gi"
+  IDLE_TIMEOUT_MINUTES: "10"
+  CLEANUP_INTERVAL_MINUTES: "3"
+  MAX_LIFETIME_HOURS: "6"
+  DISABLE_CLEANUP: "false"
+  SERVICE_HOST: "36.150.116.245"
+  NODE_PORT_BASE: "30000"
+  NODE_PORT_END: "30099"
+  NOTEBOOK_TOKEN: "amd-oneclick"
+  NOTEBOOK_LABEL_PREFIX: "amd-oneclick-v2"
+  NOTEBOOK_NODE_HOSTNAME: "wx-ms-w7900d-0027"
+  NOTEBOOK_PLATFORM_NODE_MAP: "Node#1=wx-ms-w7900d-0027,Node#2=wx-ms-w7900d-0023"
+  NOTEBOOK_PLATFORM_PORT_RANGES: "Node#1=30000-30099,Node#2=30100-30199"
+  NOTEBOOK_TOLERATE_UNSCHEDULABLE: "true"
+  PUBLIC_MODELS_HOST_PATH: "/models"
+  PUBLIC_MODELS_MOUNT_PATH: "/models"
+  RESERVATION_API_BASE_URL: "http://36.150.116.245:4101/api"
+  ALLOW_PUBLIC_NOTEBOOK_API: "false"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: amd-oneclick-secrets-v2
+  namespace: default
+type: Opaque
+stringData:
+  ADMIN_PASSWORD: "admin123"
+  NOTEBOOK_BRIDGE_SHARED_TOKEN: "9ca9c7fa3500226449f2962a5dc19e877cbb8ebb9b386918a10f3a31d649e8c9"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amd-oneclick-manager-v2
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: amd-oneclick-manager-v2
+  template:
+    metadata:
+      labels:
+        app: amd-oneclick-manager-v2
+    spec:
+      serviceAccountName: amd-oneclick-manager-v2
+      containers:
+        - name: manager
+          image: tyamd/cie2026:v2
+          imagePullPolicy: IfNotPresent
+          workingDir: /app
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: amd-oneclick-config-v2
+            - secretRef:
+                name: amd-oneclick-secrets-v2
+          resources:
+            limits:
+              cpu: "2"
+              memory: "1Gi"
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 120
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: amd-oneclick-manager-v2
+  namespace: default
+spec:
+  selector:
+    app: amd-oneclick-manager-v2
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 8000
+      nodePort: 30082

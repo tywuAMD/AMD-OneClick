@@ -38,13 +38,13 @@ def start_scheduler():
     """Start the background scheduler"""
     scheduler.add_job(
         cleanup_job,
-        trigger=IntervalTrigger(minutes=settings.IDLE_TIMEOUT_MINUTES),
+        trigger=IntervalTrigger(minutes=settings.CLEANUP_INTERVAL_MINUTES),
         id="cleanup_job",
         name="Cleanup idle and expired instances",
         replace_existing=True
     )
     scheduler.start()
-    logger.info(f"Scheduler started, cleanup runs every {settings.IDLE_TIMEOUT_MINUTES} minutes")
+    logger.info(f"Scheduler started, cleanup runs every {settings.CLEANUP_INTERVAL_MINUTES} minutes")
 
 
 def stop_scheduler():

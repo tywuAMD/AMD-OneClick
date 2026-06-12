@@ -32,6 +32,29 @@ def _parse_platform_node_map(name: str) -> dict[str, str]:
     return mapping
 
 
+def _parse_platform_port_ranges(name: str) -> dict[str, tuple[int, int]]:
+    value = os.getenv(name, "")
+    mapping: dict[str, tuple[int, int]] = {}
+
+    for entry in value.split(","):
+        if "=" not in entry:
+            continue
+        platform, port_range = entry.split("=", 1)
+        platform_key = _normalize_platform_key(platform)
+        if "-" not in port_range:
+            continue
+        start_value, end_value = port_range.split("-", 1)
+        try:
+            start_port = int(start_value.strip())
+            end_port = int(end_value.strip())
+        except ValueError:
+            continue
+        if platform_key and 0 < start_port <= end_port:
+            mapping[platform_key] = (start_port, end_port)
+
+    return mapping
+
+
 class Settings:
     # K8s Configuration
     K8S_NAMESPACE: str = os.getenv("K8S_NAMESPACE", "default")
@@ -66,6 +89,7 @@ class Settings:
     
     # Cleanup Configuration
     IDLE_TIMEOUT_MINUTES: int = int(os.getenv("IDLE_TIMEOUT_MINUTES", "10"))
+    CLEANUP_INTERVAL_MINUTES: int = int(os.getenv("CLEANUP_INTERVAL_MINUTES", str(IDLE_TIMEOUT_MINUTES)))
     MAX_LIFETIME_HOURS: int = int(os.getenv("MAX_LIFETIME_HOURS", "6"))
     DISABLE_CLEANUP: bool = _parse_bool("DISABLE_CLEANUP", False)
     
@@ -79,6 +103,8 @@ class Settings:
     # Service Configuration
     SERVICE_HOST: str = os.getenv("SERVICE_HOST", "localhost")
     NODE_PORT_BASE: int = int(os.getenv("NODE_PORT_BASE", "30000"))
+    NODE_PORT_END: int = int(os.getenv("NODE_PORT_END", "32767"))
+    NOTEBOOK_PLATFORM_PORT_RANGES: dict[str, tuple[int, int]] = _parse_platform_port_ranges("NOTEBOOK_PLATFORM_PORT_RANGES")
 
     # Reservation integration
     RESERVATION_API_BASE_URL: str = os.getenv("RESERVATION_API_BASE_URL", "http://localhost:4100/api")
