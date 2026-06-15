@@ -539,11 +539,13 @@
         }
 
         async function executeConfirm() {
+            const action = confirmAction;
+            const data = confirmData;
             closeModal();
 
-            if (confirmAction === 'destroy' && confirmData) {
-                await destroyInstance(confirmData);
-            } else if (confirmAction === 'destroyAll') {
+            if (action === 'destroy' && data) {
+                await destroyInstance(data);
+            } else if (action === 'destroyAll') {
                 await destroyAllInstances();
             }
         }
