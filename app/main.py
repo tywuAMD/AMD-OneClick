@@ -268,6 +268,26 @@ async def check_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.delete("/api/notebook/instance", response_model=DestroyResponse)
+async def destroy_notebook_instance(
+    email: str = Query(..., description="User email"),
+    _access: None = Depends(require_notebook_api_access)
+):
+    """Destroy a notebook instance by email for reservation lifecycle events."""
+    email = email.lower()
+
+    try:
+        success = k8s_client.delete_instance(email)
+        return DestroyResponse(
+            success=success,
+            message=f"Notebook instance for {email} {'destroyed' if success else 'not found'}",
+            destroyed_count=1 if success else 0
+        )
+    except Exception as e:
+        logger.error(f"Error destroying notebook for {email}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # =============================================================================
 # GitHub Notebook Endpoints
 # =============================================================================
